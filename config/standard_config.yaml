@@ -1,0 +1,54 @@
+
+data:
+  type: "DIV2K"
+  scale: 2
+  patch_h: 128
+  patch_w: 128
+  seed: 42
+  data_path: "/home/liuy/data/raw/DIV2K"
+
+loader:
+  type: "reproducible"
+  batch_size: 16
+  num_workers: 8
+  pin_memory: True
+
+model:
+  type: "CISFNO"
+  UpSampleFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 4
+    modes2: 4
+    width: 32
+    layers: 2
+    scale: 2
+    init_method: "kaiming"
+    GroupNorm: True
+    activation: "gelu"
+  ResFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 60
+    modes2: 60
+    width: 32
+    num_subnets: 8        
+    init_scales: [1.0, 40.0, 80.0, 100.0, 120.0, 140.0, 180.0, 200.0]
+
+
+trainer:
+  type: "CIStrainer"
+  epochs: 200
+  lr: 1e-3
+  save_path: 'checkpoints'
+  seed: 42
+  scheduler:
+    warmup_epochs: 5
+    lr_min: 1e-5
+  optimizer:
+    type: 'adam'
+    weight_decay: 0.0
+  
+  
+"备注": ""
+

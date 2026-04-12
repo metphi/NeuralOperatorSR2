@@ -1,0 +1,60 @@
+data:
+  type: DIV2K
+  scale: 2
+  patch_h: 128
+  patch_w: 128
+  seed: 42
+  data_path: /home/liuy/data/raw/DIV2K
+loader:
+  type: reproducible
+  batch_size: 16
+  num_workers: 8
+  pin_memory: true
+  val_batch_size: 1
+model:
+  type: CISFNO3
+  UpSampleFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 4
+    modes2: 4
+    width: 32
+    n_layers: 2
+    scale: 2
+    init_method: kaiming
+    GroupNorm: true
+    activation: gelu
+  ResFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 60
+    modes2: 60
+    width: 32
+    num_subnets: 4
+    init_scales:
+    - 1.0
+    - 40.0
+    - 80.0
+    - 100.0
+trainer:
+  eval_metric_key: psnr
+  device: cuda:1
+  type: CIStrainer2
+  epochs: 400
+  lr: 0.001
+  save_path: checkpoints/exp8
+  seed: 42
+  loss:
+    high_freq_weight: 3.0
+    low_freq_weight: 1.0
+    low_freq_ratio: 0.3
+  scheduler:
+    warmup_epochs: 10
+    restart_lr_ratio: 0.3
+    restart_warmup: 10
+    lr_min: 1.0e-05
+  optimizer:
+    type: adam
+    weight_decay: 0.0
+
+备注: 'exp8: 1.采取了两阶段训练的方式，新加频率学习，第一阶段训练250轮，第二阶段训练150轮。2.增加了高频损失和低频损失，并且增加了权重。'

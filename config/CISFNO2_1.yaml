@@ -1,0 +1,58 @@
+data:
+  type: "DIV2K"
+  scale: 2
+  patch_h: 128
+  patch_w: 128
+  seed: 42
+  data_path: "/home/liuy/data/raw/DIV2K"
+
+loader:
+  type: "reproducible"
+  batch_size: 16
+  num_workers: 8
+  pin_memory: True
+
+model:
+  type: "CISFNO"
+  UpSampleFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 4
+    modes2: 4
+    width: 32
+    n_layers: 2
+    scale: 2
+    init_method: "kaiming"
+    GroupNorm: True
+    activation: "gelu"
+  ResFNO:
+    in_channel: 3
+    out_channel: 3
+    modes1: 28
+    modes2: 28
+
+    width: 32
+    num_subnets: 3
+    init_scales: [40.0, 80.0, 100.0,]
+
+
+trainer:
+  eval_metric_key: 'psnr'
+  device: 'cuda:0'
+  type: "CIStrainer"
+  epochs: 200
+  lr: 1e-3
+  save_path: 'checkpoints/exp1'
+  seed: 42
+  scheduler:
+    warmup_epochs: 5
+    lr_min: 1e-5
+  optimizer:
+    type: 'adam'
+    weight_decay: 0.0
+  
+  
+"备注": "将resFNO直接改为了最原版的multi-scale FNO;
+        将loss改为了loss(head_pred+res_pred,hr)+loss(res_pred,(hr-head_pred).detach());
+        实验内容：探究resFNO中的modes、num_subnets的影响"
+
