@@ -44,7 +44,7 @@ class CIPtrainer(BaseTrainer):
         skip_pred, up_pred = self.model(lr_batch)
         skip_res = hr_batch - skip_pred
         loss1  = self.criterion_skip(skip_pred, hr_batch)
-        loss2  = self.criterion_up(up_pred + skip_res, hr_batch)
+        loss2  = self.criterion_up(up_pred + skip_pred, hr_batch)
         loss   = loss1 + self.alpha * loss2
         return {
             'train_loss': loss,
