@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchkbnufft as tkbn
+# import torchkbnufft as tkbn
 
 
 def count_parameters(model):
@@ -11,204 +11,204 @@ def count_parameters(model):
 
 
 
-def _make_coords(N, k_range, device):
-    """内部辅助：生成 (omega_h, omega_v) 给定 k 范围张量。"""
-    l = torch.arange(-N, N + 1, dtype=torch.float32, device=device)
-    L, K = torch.meshgrid(l, k_range, indexing="ij")   # (2N+1, len_k)
+# def _make_coords(N, k_range, device):
+#     """内部辅助：生成 (omega_h, omega_v) 给定 k 范围张量。"""
+#     l = torch.arange(-N, N + 1, dtype=torch.float32, device=device)
+#     L, K = torch.meshgrid(l, k_range, indexing="ij")   # (2N+1, len_k)
  
-    c1 = 2 * torch.pi / N
-    c2 = 2 * torch.pi / (N * N)
+#     c1 = 2 * torch.pi / N
+#     c2 = 2 * torch.pi / (N * N)
  
-    omega_h = torch.stack([
-        (c1 * K).reshape(-1),
-        (c2 * L * K).reshape(-1),
-    ], dim=0).clamp(-torch.pi, torch.pi)
+#     omega_h = torch.stack([
+#         (c1 * K).reshape(-1),
+#         (c2 * L * K).reshape(-1),
+#     ], dim=0).clamp(-torch.pi, torch.pi)
  
-    omega_v = torch.stack([
-        (c2 * L * K).reshape(-1),
-        (c1 * K).reshape(-1),
-    ], dim=0).clamp(-torch.pi, torch.pi)
+#     omega_v = torch.stack([
+#         (c2 * L * K).reshape(-1),
+#         (c1 * K).reshape(-1),
+#     ], dim=0).clamp(-torch.pi, torch.pi)
  
-    return omega_h, omega_v
- 
- 
-def build_ppft_coords_full(N: int, device=torch.device("cpu")):
-    """完整坐标，k ∈ [-N/2, N/2]，用于复数输入。"""
-    k = torch.arange(-N // 2, N // 2 + 1, dtype=torch.float32, device=device)
-    return _make_coords(N, k, device)
+#     return omega_h, omega_v
  
  
-def build_ppft_coords_half(N: int, device=torch.device("cpu")):
-    """半轴坐标，k ∈ [0, N/2]，用于实数输入加速。"""
-    k = torch.arange(0, N // 2 + 1, dtype=torch.float32, device=device)
-    return _make_coords(N, k, device)
+# def build_ppft_coords_full(N: int, device=torch.device("cpu")):
+#     """完整坐标，k ∈ [-N/2, N/2]，用于复数输入。"""
+#     k = torch.arange(-N // 2, N // 2 + 1, dtype=torch.float32, device=device)
+#     return _make_coords(N, k, device)
  
  
-# ──────────────────────────────────────────────────────────────
-# 2. 共轭填充（纯 torch，可微分）
-# ──────────────────────────────────────────────────────────────
- 
-def fill_conjugate_half(F_half: torch.Tensor, N: int) -> torch.Tensor:
-    """
-    将半轴计算结果 (..., 2N+1, N/2+1) 扩展为完整频谱 (..., 2N+1, N+1)。
- 
-    F_half 的列 s ∈ [0, N/2] 对应 k = s（非负部分，含 k=0）。
-    完整输出的列 j ∈ [0, N]   对应 k = j - N/2。
- 
-    对称性说明:
-      水平扇区每行 i（对应斜率 l）是一条穿过原点的直线，
-      对实数输入，同行内 k 轴满足共轭对称：
-          F[i, k] = conj(F[i, -k])
-      因此负半轴（k = -N/2..-1）只需对同行正半轴取共轭再翻转，
-      l 轴完全不参与。
- 
-    填充规则（对 k<0 部分，即 j = 0..N/2-1）:
-        F_full[..., i, j] = conj( F_half[..., i, N/2-j] )
-                                             ↑ 同行，k 轴对应正值
-    """
-    # 正半轴（k=0..N/2）直接作为输出右半部分
-    F_pos = F_half                           # (..., 2N+1, N/2+1)
- 
-    # 负半轴（k=-N/2..-1）：
-    #   取同行的 k=1..N/2（去掉 k=0 列），取共轭，再沿 k 轴反序
-    #   -> 结果对应 k=-N/2..-1（从小到大排列）
-    F_neg = torch.conj(F_half[..., 1:])      # (..., 2N+1, N/2)，k=1..N/2 的共轭
-    F_neg = torch.flip(F_neg, dims=[-1])     # k 轴反序 -> k=-N/2..-1
- 
-    # 拼接 [k=-N/2..-1 | k=0..N/2] -> (..., 2N+1, N+1)
-    return torch.cat([F_neg, F_pos], dim=-1)
+# def build_ppft_coords_half(N: int, device=torch.device("cpu")):
+#     """半轴坐标，k ∈ [0, N/2]，用于实数输入加速。"""
+#     k = torch.arange(0, N // 2 + 1, dtype=torch.float32, device=device)
+#     return _make_coords(N, k, device)
  
  
-# ──────────────────────────────────────────────────────────────
-# 3. PPFT 主函数
-# ──────────────────────────────────────────────────────────────
+# # ──────────────────────────────────────────────────────────────
+# # 2. 共轭填充（纯 torch，可微分）
+# # ──────────────────────────────────────────────────────────────
  
-def ppft2(image: torch.Tensor, norm: str = "ortho"):
-    """
-    2D 伪极坐标傅里叶变换（完全可微分，支持 .backward()）
+# def fill_conjugate_half(F_half: torch.Tensor, N: int) -> torch.Tensor:
+#     """
+#     将半轴计算结果 (..., 2N+1, N/2+1) 扩展为完整频谱 (..., 2N+1, N+1)。
  
-    参数:
-        image : Tensor，形状 (..., N, N)，N 为偶数
-                · 实数输入：自动启用共轭对称加速，NUFFT 计算量减半
-                · 复数输入：计算完整频率点
-        norm  : 'ortho' | 'forward' | 'backward'（同 torch.fft 约定）
+#     F_half 的列 s ∈ [0, N/2] 对应 k = s（非负部分，含 k=0）。
+#     完整输出的列 j ∈ [0, N]   对应 k = j - N/2。
  
-    返回:
-        F_h   : 水平扇区，形状 (..., 2N+1, N+1)，复数
-        F_v   : 垂直扇区，形状 (..., 2N+1, N+1)，复数
-    """
-    orig_shape = image.shape
-    N = orig_shape[-1]
-    assert orig_shape[-2] == N, f"输入最后两维必须相同，但得到 {orig_shape[-2]}×{N}"
-    assert N % 2 == 0,          f"N 必须为偶数，但得到 N={N}"
+#     对称性说明:
+#       水平扇区每行 i（对应斜率 l）是一条穿过原点的直线，
+#       对实数输入，同行内 k 轴满足共轭对称：
+#           F[i, k] = conj(F[i, -k])
+#       因此负半轴（k = -N/2..-1）只需对同行正半轴取共轭再翻转，
+#       l 轴完全不参与。
  
-    is_real = not image.is_complex()
-    device  = image.device
-    half    = N // 2
+#     填充规则（对 k<0 部分，即 j = 0..N/2-1）:
+#         F_full[..., i, j] = conj( F_half[..., i, N/2-j] )
+#                                              ↑ 同行，k 轴对应正值
+#     """
+#     # 正半轴（k=0..N/2）直接作为输出右半部分
+#     F_pos = F_half                           # (..., 2N+1, N/2+1)
  
-    # 展平 batch 维 -> (B', N, N)，转复数
-    image_2d   = image.reshape(-1, N, N).to(torch.complex64)
-    B_prime    = image_2d.shape[0]
-    image_tkbn = image_2d.unsqueeze(1)    # (B', 1, N, N)
+#     # 负半轴（k=-N/2..-1）：
+#     #   取同行的 k=1..N/2（去掉 k=0 列），取共轭，再沿 k 轴反序
+#     #   -> 结果对应 k=-N/2..-1（从小到大排列）
+#     F_neg = torch.conj(F_half[..., 1:])      # (..., 2N+1, N/2)，k=1..N/2 的共轭
+#     F_neg = torch.flip(F_neg, dims=[-1])     # k 轴反序 -> k=-N/2..-1
  
-    nufft_ob = tkbn.KbNufft(im_size=(N, N)).to(device)
- 
-    # ── 计算频率坐标（无需梯度）─────────────────────────────
-    with torch.no_grad():
-        if is_real:
-            omega_h, omega_v = build_ppft_coords_half(N, device=device)
-            k_cols = half + 1          # 实际计算的列数
-        else:
-            omega_h, omega_v = build_ppft_coords_full(N, device=device)
-            k_cols = N + 1
- 
-    # ── NUFFT 前向 ────────────────────────────────────────────
-    out_h = nufft_ob(image_tkbn, omega_h).squeeze(1)   # (B', (2N+1)*k_cols)
-    out_v = nufft_ob(image_tkbn, omega_v).squeeze(1)
- 
-    # ── 归一化 ────────────────────────────────────────────────
-    scale = {
-        "ortho":    1.0 / N,
-        "forward":  1.0 / (N * N),
-        "backward": 1.0,
-    }[norm]
-    out_h = out_h * scale
-    out_v = out_v * scale
- 
-    # ── reshape 到 (B', 2N+1, k_cols) ────────────────────────
-    out_h = out_h.reshape(B_prime, 2 * N + 1, k_cols)
-    out_v = out_v.reshape(B_prime, 2 * N + 1, k_cols)
- 
-    # ── 实数输入：共轭对称填充完整频谱 ───────────────────────
-    if is_real:
-        out_h = fill_conjugate_half(out_h, N)   # (B', 2N+1, N+1)
-        out_v = fill_conjugate_half(out_v, N)
- 
-    # ── 恢复原始 batch 形状 ───────────────────────────────────
-    out_shape = orig_shape[:-2] + (2 * N + 1, N + 1)
-    return out_h.reshape(out_shape), out_v.reshape(out_shape)
+#     # 拼接 [k=-N/2..-1 | k=0..N/2] -> (..., 2N+1, N+1)
+#     return torch.cat([F_neg, F_pos], dim=-1)
  
  
-def ppft2_stacked(image: torch.Tensor, norm: str = "ortho"):
-    """
-    返回: F，形状 (..., 2, 2N+1, N+1)
-          F[..., 0, :, :] = 水平扇区
-          F[..., 1, :, :] = 垂直扇区
-    """
-    F_h, F_v = ppft2(image, norm=norm)
-    return torch.stack([F_h, F_v], dim=-3)
+# # ──────────────────────────────────────────────────────────────
+# # 3. PPFT 主函数
+# # ──────────────────────────────────────────────────────────────
+ 
+# def ppft2(image: torch.Tensor, norm: str = "ortho"):
+#     """
+#     2D 伪极坐标傅里叶变换（完全可微分，支持 .backward()）
+ 
+#     参数:
+#         image : Tensor，形状 (..., N, N)，N 为偶数
+#                 · 实数输入：自动启用共轭对称加速，NUFFT 计算量减半
+#                 · 复数输入：计算完整频率点
+#         norm  : 'ortho' | 'forward' | 'backward'（同 torch.fft 约定）
+ 
+#     返回:
+#         F_h   : 水平扇区，形状 (..., 2N+1, N+1)，复数
+#         F_v   : 垂直扇区，形状 (..., 2N+1, N+1)，复数
+#     """
+#     orig_shape = image.shape
+#     N = orig_shape[-1]
+#     assert orig_shape[-2] == N, f"输入最后两维必须相同，但得到 {orig_shape[-2]}×{N}"
+#     assert N % 2 == 0,          f"N 必须为偶数，但得到 N={N}"
+ 
+#     is_real = not image.is_complex()
+#     device  = image.device
+#     half    = N // 2
+ 
+#     # 展平 batch 维 -> (B', N, N)，转复数
+#     image_2d   = image.reshape(-1, N, N).to(torch.complex64)
+#     B_prime    = image_2d.shape[0]
+#     image_tkbn = image_2d.unsqueeze(1)    # (B', 1, N, N)
+ 
+#     nufft_ob = tkbn.KbNufft(im_size=(N, N)).to(device)
+ 
+#     # ── 计算频率坐标（无需梯度）─────────────────────────────
+#     with torch.no_grad():
+#         if is_real:
+#             omega_h, omega_v = build_ppft_coords_half(N, device=device)
+#             k_cols = half + 1          # 实际计算的列数
+#         else:
+#             omega_h, omega_v = build_ppft_coords_full(N, device=device)
+#             k_cols = N + 1
+ 
+#     # ── NUFFT 前向 ────────────────────────────────────────────
+#     out_h = nufft_ob(image_tkbn, omega_h).squeeze(1)   # (B', (2N+1)*k_cols)
+#     out_v = nufft_ob(image_tkbn, omega_v).squeeze(1)
+ 
+#     # ── 归一化 ────────────────────────────────────────────────
+#     scale = {
+#         "ortho":    1.0 / N,
+#         "forward":  1.0 / (N * N),
+#         "backward": 1.0,
+#     }[norm]
+#     out_h = out_h * scale
+#     out_v = out_v * scale
+ 
+#     # ── reshape 到 (B', 2N+1, k_cols) ────────────────────────
+#     out_h = out_h.reshape(B_prime, 2 * N + 1, k_cols)
+#     out_v = out_v.reshape(B_prime, 2 * N + 1, k_cols)
+ 
+#     # ── 实数输入：共轭对称填充完整频谱 ───────────────────────
+#     if is_real:
+#         out_h = fill_conjugate_half(out_h, N)   # (B', 2N+1, N+1)
+#         out_v = fill_conjugate_half(out_v, N)
+ 
+#     # ── 恢复原始 batch 形状 ───────────────────────────────────
+#     out_shape = orig_shape[:-2] + (2 * N + 1, N + 1)
+#     return out_h.reshape(out_shape), out_v.reshape(out_shape)
+ 
+ 
+# def ppft2_stacked(image: torch.Tensor, norm: str = "ortho"):
+#     """
+#     返回: F，形状 (..., 2, 2N+1, N+1)
+#           F[..., 0, :, :] = 水平扇区
+#           F[..., 1, :, :] = 垂直扇区
+#     """
+#     F_h, F_v = ppft2(image, norm=norm)
+#     return torch.stack([F_h, F_v], dim=-3)
 
-def ppft_freq_shift(F: torch.Tensor, drop_ratio: float = 0.4) -> torch.Tensor:
-    """
-    对 PPFT 频谱每条线做低频丢弃 + 高频移位 + 补零。
+# def ppft_freq_shift(F: torch.Tensor, drop_ratio: float = 0.4) -> torch.Tensor:
+#     """
+#     对 PPFT 频谱每条线做低频丢弃 + 高频移位 + 补零。
 
-    参数:
-        F          : (..., 2N+1, N+1) 复数张量（PPFT 输出）
-        N          : 图像边长（偶数）
-        drop_ratio : 零频两侧各丢弃比例，默认 0.2
+#     参数:
+#         F          : (..., 2N+1, N+1) 复数张量（PPFT 输出）
+#         N          : 图像边长（偶数）
+#         drop_ratio : 零频两侧各丢弃比例，默认 0.2
 
-    返回:
-        F_out      : (..., 2N+1, N+1) 复数张量，与输入形状相同
-    """
-    N = F.shape[-1]-1
-    half  = N // 2                         # 零频索引
-    drop  = round(drop_ratio * half)          # 两侧各丢弃的点数
-    keep  = half - drop                    # 两侧各保留的高频点数
+#     返回:
+#         F_out      : (..., 2N+1, N+1) 复数张量，与输入形状相同
+#     """
+#     N = F.shape[-1]-1
+#     half  = N // 2                         # 零频索引
+#     drop  = round(drop_ratio * half)          # 两侧各丢弃的点数
+#     keep  = half - drop                    # 两侧各保留的高频点数
 
-    assert keep >= 0, (
-        f"drop_ratio={drop_ratio} 过大：half={half}, drop={drop}, keep={keep}<0"
-    )
+#     assert keep >= 0, (
+#         f"drop_ratio={drop_ratio} 过大：half={half}, drop={drop}, keep={keep}<0"
+#     )
 
-    line_len = N + 1                       # 每行总长
-    assert F.shape[-1] == line_len, f"最后一维期望 {line_len}，实际 {F.shape[-1]}"
+#     line_len = N + 1                       # 每行总长
+#     assert F.shape[-1] == line_len, f"最后一维期望 {line_len}，实际 {F.shape[-1]}"
 
-    # ── 从原始行中取出各段 ────────────────────────────────────
-    # 负高频（左侧高频）: 索引 [0 .. keep-1]         共 keep 个
-    # 丢弃区（左）      : 索引 [keep .. half-1]       共 drop 个  → 不用
-    # 零频              : 索引 [half]                 共 1   个
-    # 丢弃区（右）      : 索引 [half+1 .. half+drop]  共 drop 个  → 不用
-    # 正高频（右侧高频）: 索引 [half+drop+1 .. N]     共 keep 个
+#     # ── 从原始行中取出各段 ────────────────────────────────────
+#     # 负高频（左侧高频）: 索引 [0 .. keep-1]         共 keep 个
+#     # 丢弃区（左）      : 索引 [keep .. half-1]       共 drop 个  → 不用
+#     # 零频              : 索引 [half]                 共 1   个
+#     # 丢弃区（右）      : 索引 [half+1 .. half+drop]  共 drop 个  → 不用
+#     # 正高频（右侧高频）: 索引 [half+drop+1 .. N]     共 keep 个
 
-    neg_high = F[..., :keep]                      # (..., 2N+1, keep)
-    dc       = F[..., half : half + 1]            # (..., 2N+1, 1)
-    pos_high = F[..., half + drop + 1 : N + 1]   # (..., 2N+1, keep)
+#     neg_high = F[..., :keep]                      # (..., 2N+1, keep)
+#     dc       = F[..., half : half + 1]            # (..., 2N+1, 1)
+#     pos_high = F[..., half + drop + 1 : N + 1]   # (..., 2N+1, keep)
 
-    # 验证取出的正高频长度
-    assert pos_high.shape[-1] == keep, (
-        f"正高频长度期望 {keep}，实际 {pos_high.shape[-1]}"
-    )
+#     # 验证取出的正高频长度
+#     assert pos_high.shape[-1] == keep, (
+#         f"正高频长度期望 {keep}，实际 {pos_high.shape[-1]}"
+#     )
 
-    # ── 构造补零段 ────────────────────────────────────────────
-    pad_shape = F.shape[:-1] + (drop,)
-    zeros = torch.zeros(pad_shape, dtype=F.dtype, device=F.device)
+#     # ── 构造补零段 ────────────────────────────────────────────
+#     pad_shape = F.shape[:-1] + (drop,)
+#     zeros = torch.zeros(pad_shape, dtype=F.dtype, device=F.device)
 
-    # ── 拼接：[0...0 | neg_high | dc | pos_high | 0...0] ─────
-    # 长度验证: drop + keep + 1 + keep + drop = 2*drop + 2*keep + 1
-    #         = 2*drop + 2*(half-drop) + 1 = 2*half + 1 = N + 1  ✓
-    F_out = torch.cat([zeros, neg_high, dc, pos_high, zeros], dim=-1)
+#     # ── 拼接：[0...0 | neg_high | dc | pos_high | 0...0] ─────
+#     # 长度验证: drop + keep + 1 + keep + drop = 2*drop + 2*keep + 1
+#     #         = 2*drop + 2*(half-drop) + 1 = 2*half + 1 = N + 1  ✓
+#     F_out = torch.cat([zeros, neg_high, dc, pos_high, zeros], dim=-1)
 
-    assert F_out.shape == F.shape, f"输出形状 {F_out.shape} ≠ 输入形状 {F.shape}"
-    return F_out
+#     assert F_out.shape == F.shape, f"输出形状 {F_out.shape} ≠ 输入形状 {F.shape}"
+#     return F_out
 
 def rgb_to_y(img: torch.Tensor) -> torch.Tensor:
     """

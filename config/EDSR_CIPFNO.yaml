@@ -1,0 +1,72 @@
+data:
+  type: DIV2K
+  norm: {'lr': {'sub': 0.5, 'div': 0.5}, 'gt': {'sub': 0.5, 'div': 0.5}}
+  scale: 2
+  patch_h: 128
+  patch_w: 128
+  seed: 42
+  data_path: /home/liuy/data/raw/DIV2K
+loader:
+  type: reproducible
+  batch_size: 16
+  num_workers: 8
+  pin_memory: true
+  val_batch_size: 1
+model:
+  type: EDSR-CIPFNO
+  Encoder:
+    in_channel: 3
+    out_channel: 64
+    num_blocks: 16
+    res_scale: 0.1
+    activation: gelu
+  SkipFNO:
+    in_channel: 64
+    out_channel: 3
+    modes1: 4
+    modes2: 4
+    width: 64
+    n_layers: 2
+    scale: 2
+    init_method: kaiming
+    GroupNorm: true
+    activation: gelu
+  UpFNO:
+    in_channel: 64
+    out_channel: 3
+    modes1: 60
+    modes2: 60
+    width: 64
+    layers: 4
+    scale: 2
+    init_method: kaiming
+    activation: gelu
+    num_subnets: 4
+    init_scales:
+    - 1.0
+    - 40.0
+    - 80.0
+    - 100.0
+
+trainer:
+  eval_metric_key: psnr
+  device: cuda:1
+  type: CIPtrainer
+  epochs: 400
+  lr: 0.001
+  save_path: checkpoints/exp12
+  seed: 42
+  # loss:
+  #   high_freq_weight: 3.0
+  #   low_freq_weight: 1.0
+  #   low_freq_ratio: 0.3
+  scheduler:
+    warmup_epochs: 10
+    # restart_lr_ratio: 0.3
+    # restart_warmup: 10
+    lr_min: 1.0e-05
+  optimizer:
+    type: adam
+    weight_decay: 0.0
+
+备注: 'exp12: 1.并联结构，loss=pixel_l2(skip, gt) + pixel_l2(skip+up, gt)'
