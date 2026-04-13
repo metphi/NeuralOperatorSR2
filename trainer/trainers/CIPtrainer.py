@@ -10,7 +10,7 @@ from trainer.registry import TRAINER_REGISTRY
 class CIPtrainer(BaseTrainer):
 
     def __init__(self, model, loaders, config):
-        self.CIPList = ["CIPFNO", "CIPModel", "CIPFNO1"]     
+        # self.CIPList = ["CIPFNO", "CIPModel", "CIPFNO1"]     
         super().__init__(model, loaders, config)                          
 
     def _setup(self):
@@ -29,8 +29,8 @@ class CIPtrainer(BaseTrainer):
 
     def on_train_begin(self):
         super().on_train_begin()
-        if self.model.__class__.__name__ not in self.CIPList:
-            raise TypeError(f"传入模型应该为{self.CIPList}，got {self.model.__class__.__name__}")
+        # if self.model.__class__.__name__ not in self.CIPList:
+        #     raise TypeError(f"传入模型应该为{self.CIPList}，got {self.model.__class__.__name__}")
 
     def on_epoch_begin(self, epoch):
         super().on_epoch_begin(epoch)

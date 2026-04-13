@@ -13,7 +13,7 @@ loader:
   pin_memory: true
   val_batch_size: 1
 model:
-  type: EDSR-CIPFNO
+  type: EDSR_CIPFNO
   Encoder:
     in_channel: 3
     out_channel: 64

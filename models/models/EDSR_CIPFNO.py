@@ -5,25 +5,57 @@ from models.registry import MODEL_REGISTRY
 from omegaconf import OmegaConf
 from models.fundamental import *
 from models.utils import *
-from CIPFNO import MultiScaleFNO2d, UpSampleFNO2
+from models.models.CIPFNO import MultiScaleFNO2d
 
 
-
+class _UpSampleFNO2(nn.Module):
+    def __init__(self, in_channel, out_channel, modes1 = 4, modes2 = 4, width = 32, n_layers = 4, scale = 2,
+                 activation='gelu',
+                 init_method='kaiming',
+                 GroupNorm = True,
+                 ):
+        super().__init__()
+        self.s = scale
+        self.activation = get_activation(activation)
+        self.Lifting = nn.Sequential(
+            nn.Conv2d(in_channel, in_channel, kernel_size=3, padding=1),
+            self.activation,
+            nn.Conv2d(in_channel, width, kernel_size=3, padding=1)
+        )
+        
+        self.blocks = FNOBlocks(width, n_layers, modes1, modes2, init_method, activation)
+        
+        self.GroupNorm = GroupNorm
+        self.GN = nn.GroupNorm(4, width)
+        self.Projecting = nn.Sequential(
+            nn.Conv2d(width, out_channel *self.s**2, kernel_size=3, padding=1),
+            nn.PixelShuffle(self.s),
+            self.activation,
+            nn.Conv2d(out_channel, out_channel, kernel_size=3, padding=1)
+        )
+        
+    def forward(self, x):
+        x = self.Lifting(x)
+        x = self.blocks(x)
+        if self.GroupNorm:
+            x = self.GN(x)
+        x = self.Projecting(x)
+        return x
 
 class EDSREncoder(nn.Module):
     """EDSR特征提取器（去掉上采样部分）"""
-    def __init__(self, in_channels=3, out_channels=64, num_blocks=16, res_scale=0.1, activation='gelu'):
+    def __init__(self, in_channel=3, out_channel=64, num_blocks=16, res_scale=0.1, activation='gelu'):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv_first = nn.Conv2d(in_channel, out_channel, kernel_size=3, padding=1)
         
         # 残差块堆叠
         self.residual_blocks = nn.ModuleList([
-            ResidualBlock(out_channels, res_scale, activation) 
+            ResidualBlock(out_channel, res_scale, activation) 
             for _ in range(num_blocks)
         ])
         
         # 特征融合（长跳跃连接）
-        self.conv_last = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.conv_last = nn.Conv2d(out_channel, out_channel, kernel_size=3, padding=1)
     
     def forward(self, x):
         x = self.conv_first(x)
@@ -55,7 +87,7 @@ class ResidualBlock(nn.Module):
 
 
     
-@MODEL_REGISTRY.register("EDSR-CIPFNO")
+@MODEL_REGISTRY.register("EDSR_CIPFNO")
 class EDSR_CIPFNO(nn.Module):
     def __init__(self, 
                  config,
@@ -71,11 +103,12 @@ class EDSR_CIPFNO(nn.Module):
         cfg_up = OmegaConf.to_container(cfg["UpFNO"], resolve=True)
         cfg_encoder = OmegaConf.to_container(cfg["Encoder"], resolve=True)
         self.encoder = EDSREncoder(**cfg_encoder)
-        self.skip_FNO = UpSampleFNO2(**cfg_skip)
+        self.skip_FNO = _UpSampleFNO2(**cfg_skip)
         self.up_FNO = MultiScaleFNO2d(**cfg_up)
 
     def forward(self, x):
-        x = self.encoder(x)
-        x_skip = self.skip_FNO(x)
-        x_up   = self.up_FNO(x)
+        base = F.interpolate(x, scale_factor=self.scale, mode='bilinear', align_corners=False,)
+        fea = self.encoder(x)
+        x_skip = self.skip_FNO(fea) + base
+        x_up   = self.up_FNO(fea)
         return x_skip, x_up
