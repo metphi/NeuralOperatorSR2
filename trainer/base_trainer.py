@@ -27,8 +27,9 @@ class BaseTrainer(ABC):
         self._set_globel_seed()
         self.optimizer = self._build_optimizer()
         self.scheduler = self._build_scheduler()
-        self.logger, self.log_path = self._build_logger()
-        self.writer    = SummaryWriter(log_dir=str(self.save_path))
+        self.logger, self.log_path = self._build_logger(log_dir=self.config.get("log_dir", None))
+        tf_path = self.save_path if not self.config.get("tf_dir", None) else str(self.config.tf_dir)
+        self.writer    = SummaryWriter(log_dir=tf_path)
         self.best_eval_metric = float('inf')
         # 如果 config 里指定了 resume 路径，自动恢复
         self._set_device()
@@ -233,8 +234,11 @@ class BaseTrainer(ABC):
 
         return LambdaLR(self.optimizer, lr_lambda=lr_lambda)
 
-    def _build_logger(self):
-        log_path = self.save_path / f"train_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    def _build_logger(self, log_dir=None):
+        if log_dir is None:
+            log_path = self.save_path / f"train_{time.strftime('%Y%m%d_%H%M%S')}.log"
+        else:
+            log_path = Path(log_dir) / f"train_{time.strftime('%Y%m%d_%H%M%S')}.log"
         logger   = logging.getLogger(f"TrainLogger_{id(self)}")  # 避免多实例共享 handler
         logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')

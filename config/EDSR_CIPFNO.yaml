@@ -55,6 +55,8 @@ trainer:
   epochs: 400
   lr: 0.001
   save_path: checkpoints/EDSR_CIPFNO
+  log_dir: None
+  tf_dir: None
   seed: 42
   # loss:
   #   high_freq_weight: 3.0
