@@ -50,11 +50,11 @@ model:
 
 trainer:
   eval_metric_key: psnr
-  device: cuda:1
+  device: cuda:0
   type: CIPtrainer
   epochs: 400
   lr: 0.001
-  save_path: checkpoints/exp12
+  save_path: checkpoints/EDSR_CIPFNO
   seed: 42
   # loss:
   #   high_freq_weight: 3.0
@@ -69,4 +69,3 @@ trainer:
     type: adam
     weight_decay: 0.0
 
-备注: 'exp12: 1.并联结构，loss=pixel_l2(skip, gt) + pixel_l2(skip+up, gt)'

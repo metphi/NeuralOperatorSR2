@@ -3,6 +3,7 @@ from data.registry   import DATASET_REGISTRY, LOADER_REGISTRY
 from trainer.registry import TRAINER_REGISTRY
 from models.registry  import MODEL_REGISTRY
 from omegaconf import OmegaConf
+import argparse
 
 # 自动import所有实现类，触发装饰器注册
 import data.datasets 
@@ -32,34 +33,33 @@ def main(config):
     
     
 if __name__ == "__main__":
-    # base_config = OmegaConf.load("config/CISFNO.yaml")
     
-    # new_join = {
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', "--config", type=str, required=True, help="Path to the config file.")
+    parser.add_argument('--device', type=str, default='cuda:0', help='Device to use for training (e.g., "cuda:0" or "cpu").')
+    parser.add_argument("--save_path", type=str, help="Path to save checkpoints and logs(overrides config if provided).")
+    parser.add_argument("--data_path", type=str, help="Path to the dataset (overrides config if provided).")
+    parser.add_argument('-m', "--remarks", type=str, default="", help="Additional remarks for the experiment.")
+    parser.add_argument("--lr", type=float, help="Learning rate for training (overrides config if provided).")
+    parser.add_argument("--epochs", type=int, help="Number of training epochs (overrides config if provided).")
+    parser.add_argument("--seed", type=int, help="Random seed for reproducibility (overrides config if provided).")
+    
+    args = parser.parse_args()
+    config = OmegaConf.load(args.config)
+    config.trainer.device = args.device
+    config.remarks = args.remarks
+    if args.lr is not None:
+        config.trainer.lr = args.lr
+    if args.epochs is not None:
+        config.trainer.epochs = args.epochs
+    if args.seed is not None:
+        config.trainer.seed = args.seed
+        config.data.seed = args.seed
+    if args.save_path is not None:
+        config.trainer.save_path = args.save_path
+    if args.data_path is not None:
+        config.data.data_path = args.data_path
         
-    # }
-    # config = OmegaConf.merge(base_config, OmegaConf.create(new_join))
-    exp_ = "exp13"
-    train_list = ["config/CISFNO1.yaml","config/CISFNO1.yaml","config/CISFNO3.yaml", "config/CISFNO1_1.yaml", "config/CISFNO2_1.yaml", "config/CISFNO3_1.yaml"]
-    train_list = ["config/CISFNO.yaml"]
-    train_list = ["config/CIPFNO.yaml"]
-    train_list = ["checkpoints/exp11/20260408_124446/config.yaml"]
-    new_Remarks = f"{exp_}: 并联结构，loss=pixel_l2(skip, gt) + pixel_l2(up + skip, gt)" 
-    new_save_path = f"checkpoints/{exp_}"
-    model_type = "CIPFNO"
-    # lr_min = 1e-5
+        
+    main(config)
     
-    epochs = 400
-    for path in train_list:
-        config = OmegaConf.load(path)
-        # config.trainer.type = "CIPtrainer"
-        # config["备注"] = new_Remarks
-        # config.loader.val_batch_size = 1
-        # config.model.type = model_type
-        config.trainer.device = "cuda:0"
-        # config.trainer.save_path = new_save_path
-        # config.trainer.loss.high_freq_weight = 1.0
-        # config.trainer.loss.low_freq_weight = 0.0
-        # config.trainer.loss.low_freq_ratio = 0.4
-        # config.trainer.scheduler.lr_min = lr_min
-        # config.trainer.epochs = epochs
-        main(config)

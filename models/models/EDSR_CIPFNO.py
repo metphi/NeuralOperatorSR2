@@ -82,7 +82,7 @@ class ResidualBlock(nn.Module):
         x = self.conv1(x)
         x = self.activation(x)
         x = self.conv2(x)
-        x = x.mul(self.res_scale) + residual
+        x = self.res_scale * x + residual
         return x
 
 
