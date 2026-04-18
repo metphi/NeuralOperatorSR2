@@ -210,7 +210,7 @@ def count_parameters(model):
 #     assert F_out.shape == F.shape, f"输出形状 {F_out.shape} ≠ 输入形状 {F.shape}"
 #     return F_out
 
-def rgb_to_y(img: torch.Tensor) -> torch.Tensor:
+def rgb_to_y(img: torch.Tensor, standard: str = "ITU-R BT.601") -> torch.Tensor:
     """
     RGB -> Y (亮度通道), ITU-R BT.601
     img: (B, 3, H, W) or (3, H, W), range [0, 1]

@@ -1,6 +1,7 @@
 import math
 import torch
 from utils._utils import *
+from utils.merics_utlis import SRMetric
 from loss.loss import FreqLoss, ResExplicitLoss
 from trainer.base_trainer import BaseTrainer
 from trainer.registry import TRAINER_REGISTRY
@@ -21,9 +22,11 @@ class CIPtrainer(BaseTrainer):
         else:
             self.norm = norm
         self.alpha     = self.config.get("alpha", 1.0)
-        self.psnr      = PSNR()
-        self.ssim      = SSIM()
-        self.ssim.to(self.device)
+        scale = self._ALL_CONFIG.data.get("scale", 2)
+        self.psnr_y      = SRMetric('psnr', test_y_channel=True, crop_border=scale+6)
+        self.ssim_y      = SRMetric('ssim', test_y_channel=True, crop_border=scale+6)
+        self.psnr_rgb    = SRMetric('psnr', test_y_channel=False, crop_border=scale+6)
+        self.ssim_rgb    = SRMetric('ssim', test_y_channel=False, crop_border=scale+6)
         self.criterion_skip = nn.MSELoss()
         self.criterion_up = nn.L1Loss()
 
@@ -109,16 +112,18 @@ class CIPtrainer(BaseTrainer):
         sr_batch = (sr_batch * self.norm['gt']['div'] + self.norm['gt']['sub']).clamp(0, 1)
         return {
             "val_loss": self.criterion_skip(sr_batch, hr_batch).item(),
-            "psnr"    : self.psnr(sr_batch, hr_batch).item(),
-            "ssim"    : self.ssim(sr_batch, hr_batch).item(),
+            "psnr_y"    : self.psnr_y(sr_batch, hr_batch).item(),
+            "ssim_y"    : self.ssim_y(sr_batch, hr_batch).item(),
+            "psnr_rgb"  : self.psnr_rgb(sr_batch, hr_batch).item(),
+            "ssim_rgb"  : self.ssim_rgb(sr_batch, hr_batch).item(),
         }
 
     def _get_train_metric_keys(self):
         return ["train_loss", "skip_loss", "up_loss"]
 
     def _get_eval_metric_keys(self):
-        return ["val_loss", "psnr", "ssim"]
-    
+        return ["val_loss", "psnr_y", "ssim_y", "psnr_rgb", "ssim_rgb"]
+
     def _save_checkpoint(self):
         eval_metric_key = self.config.get('eval_metric_key', 'val_loss')
         if eval_metric_key == "psnr" or eval_metric_key == "ssim":
