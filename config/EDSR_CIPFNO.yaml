@@ -5,11 +5,11 @@ data:
   patch_h: 128
   patch_w: 128
   seed: 42
-  data_path: /home/liuy/data/raw/DIV2K
+  data_path: /root/autodl-tmp/DIV2K
 loader:
   type: reproducible
   batch_size: 16
-  num_workers: 8
+  num_workers: 16
   pin_memory: true
   val_batch_size: 1
 model:
@@ -18,7 +18,8 @@ model:
     in_channel: 3
     out_channel: 64
     num_blocks: 16
-    res_scale: 0.1
+    res_scale: 0.01
+    global_res_scale: 0.1
     activation: gelu
   SkipFNO:
     in_channel: 64
@@ -53,10 +54,9 @@ trainer:
   device: cuda:0
   type: CIPtrainer
   epochs: 400
-  lr: 0.001
-  save_path: checkpoints/EDSR_CIPFNO
-  log_dir: None
-  tf_dir: None
+  lr: 0.0005
+  encoder_grad_clip: 10.0
+  save_path: /root/autodl-tmp/checkpoints
   seed: 42
   # loss:
   #   high_freq_weight: 3.0

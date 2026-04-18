@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.registry import MODEL_REGISTRY
@@ -44,10 +43,14 @@ class _UpSampleFNO2(nn.Module):
 
 class EDSREncoder(nn.Module):
     """EDSR特征提取器（去掉上采样部分）"""
-    def __init__(self, in_channel=3, out_channel=64, num_blocks=16, res_scale=0.1, activation='gelu'):
+    def __init__(self, in_channel=3, out_channel=64, num_blocks=16, res_scale=0.1, global_res_scale=0.1, activation='gelu'):
         super().__init__()
         self.conv_first = nn.Conv2d(in_channel, out_channel, kernel_size=3, padding=1)
-        
+        nn.init.normal_(self.conv_first.weight, mean=0, std=0.02)
+        if self.conv_first.bias is not None:
+            nn.init.zeros_(self.conv_first.bias)
+        self.res_scale = res_scale
+        self.global_res_scale=global_res_scale
         # 残差块堆叠
         self.residual_blocks = nn.ModuleList([
             ResidualBlock(out_channel, res_scale, activation) 
@@ -65,7 +68,7 @@ class EDSREncoder(nn.Module):
             x = block(x)
         
         x = self.conv_last(x)
-        x = x + residual  # 长跳跃连接
+        x = self.global_res_scale * x + residual  # 长跳跃连接
         return x
 
 class ResidualBlock(nn.Module):
@@ -75,6 +78,12 @@ class ResidualBlock(nn.Module):
         self.activation = get_activation(activation)
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        nn.init.normal_(self.conv1.weight, mean=0, std=0.02)
+        if self.conv1.bias is not None:
+            nn.init.zeros_(self.conv1.bias)
+        nn.init.normal_(self.conv2.weight, mean=0, std=0.02)
+        if self.conv2.bias is not None:
+            nn.init.zeros_(self.conv2.bias)
         self.res_scale = res_scale
     
     def forward(self, x):
@@ -105,6 +114,8 @@ class EDSR_CIPFNO(nn.Module):
         self.encoder = EDSREncoder(**cfg_encoder)
         self.skip_FNO = _UpSampleFNO2(**cfg_skip)
         self.up_FNO = MultiScaleFNO2d(**cfg_up)
+        # self.skip_weight = nn.Parameter(torch.tensor(0.5))
+        # self.up_weight = nn.Parameter(torch.tensor(0.5))
 
     def forward(self, x):
         base = F.interpolate(x, scale_factor=self.scale, mode='bilinear', align_corners=False,)
@@ -112,3 +123,4 @@ class EDSR_CIPFNO(nn.Module):
         x_skip = self.skip_FNO(fea) + base
         x_up   = self.up_FNO(fea)
         return x_skip, x_up
+        # return x_skip*torch.sigmoid(self.skip_weight), x_up*torch.sigmoid(self.up_weight)

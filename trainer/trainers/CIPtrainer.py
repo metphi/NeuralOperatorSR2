@@ -39,6 +39,56 @@ class CIPtrainer(BaseTrainer):
             if hasattr(sampler, 'set_epoch'):        
                 sampler.set_epoch(self.current_epoch)
 
+    def _train_epoch(self):
+        self._model_train_state_set()
+        train_keys = self._get_train_metric_keys()
+        backward_key = train_keys[0]
+        total_samples = 0
+        
+        for batch_idx, batch in enumerate(self.loaders['train']):
+            batch_size = batch[0].shape[0]
+            batch = [item.to(self.device) for item in batch]
+            self.optimizer.zero_grad()
+            out = self._train_step(batch)
+            
+            # backward
+            out[backward_key].backward()
+            
+            # ========== 局部梯度监控 ==========
+            if hasattr(self.model, "encoder"):
+                total_norm = sum(p.grad.data.norm(2).item() ** 2 
+                                for p in self.model.encoder.parameters() 
+                                if p.grad is not None) ** 0.5
+                
+                # 如果梯度过大,打印
+                if total_norm > 15.0:  # 阈值可调
+                    self.logger.warning(
+                        f"⚠️ Batch {batch_idx}: Encoder Grad Norm = {total_norm:.4f}, "
+                        f"Loss = {out[backward_key].item():.6f}"
+                    )
+
+                    if self.config.get("encoder_grad_clip", None):
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.encoder.parameters(), self.config.encoder_grad_clip
+                        )
+                        self.logger.info(f"{self.current_epoch}: {batch_idx}: Encoder Grad has been clipped to ±{self.config.encoder_grad_clip}")
+                
+            # 梯度裁剪
+            if self.config.get("grad_clip", None):
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.grad_clip
+                )
+            
+            self.optimizer.step()
+            
+            for k in train_keys:
+                val = out[k].item() if isinstance(out[k], torch.Tensor) else out[k]
+                self.train_metric[k] += val * batch_size
+            total_samples += batch_size
+        
+        for k in train_keys:
+            self.train_metric[k] /= total_samples
+
     def _train_step(self, batch):
         lr_batch, hr_batch = batch
         skip_pred, up_pred = self.model(lr_batch)
@@ -84,15 +134,17 @@ class CIPtrainer(BaseTrainer):
                 "eval_metric"         : self.eval_metric,
             }
             # 始终保存 last
-            torch.save(checkpoint, self.save_path / "last.pth")
+            if (self.current_epoch+1) % 20 == 0:
+                torch.save(checkpoint, self.save_path / "last.pth")
             # 按主指标保存 best
-            current = self.eval_metric.get(eval_metric_key, float('inf'))
-            if current >= self.best_eval_metric:
-                self.best_eval_metric = current
-                torch.save(checkpoint, self.save_path / "best.pth")
-                self.logger.info(
-                    f"  ↑ Best checkpoint saved | {eval_metric_key}: {current:.5f}"
-                )
+            if self.current_epoch >= 0.75*self.config.epochs:
+                current = self.eval_metric.get(eval_metric_key, float('inf'))
+                if current >= self.best_eval_metric:
+                    self.best_eval_metric = current
+                    torch.save(checkpoint, self.save_path / "best.pth")
+                    self.logger.info(
+                        f"  ↑ Best checkpoint saved | {eval_metric_key}: {current:.5f}"
+                    )
         else:
                 super()._save_checkpoint()
         
