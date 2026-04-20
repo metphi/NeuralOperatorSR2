@@ -79,3 +79,20 @@ class ResExplicitLoss(nn.Module):
         freq_loss = self.freq_loss(res_pred, head_res)
 
         return (pixel_loss + self.freq_weight * freq_loss, pixel_loss, freq_loss)
+    
+class CharbonnierLoss(nn.Module):
+    def __init__(self, epsilon=1e-3, reduction='mean'):
+        super().__init__()
+        self.epsilon = epsilon
+        self.reduction = reduction
+
+    def forward(self, pred, target):
+        diff = pred - target
+        loss = torch.sqrt(diff ** 2 + self.epsilon ** 2)
+        
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:  # 'none'
+            return loss

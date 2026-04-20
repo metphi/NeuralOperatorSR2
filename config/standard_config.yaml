@@ -49,6 +49,5 @@ trainer:
     type: 'adam'
     weight_decay: 0.0
   
-  
-"备注": ""
+
 

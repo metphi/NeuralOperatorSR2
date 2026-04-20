@@ -2,16 +2,15 @@ import math
 import torch
 from utils._utils import *
 from utils.metrics_utils import SRMetric
-from loss.loss import FreqLoss, ResExplicitLoss
+from loss.loss import FreqLoss, ResExplicitLoss, CharbonnierLoss
 from trainer.base_trainer import BaseTrainer
 from trainer.registry import TRAINER_REGISTRY
 
 
-@TRAINER_REGISTRY.register("CIPtrainer")
-class CIPtrainer(BaseTrainer):
+@TRAINER_REGISTRY.register("1OputTrainer")
+class OneOputTrainer(BaseTrainer):
 
-    def __init__(self, model, loaders, config):
-        # self.CIPList = ["CIPFNO", "CIPModel", "CIPFNO1"]     
+    def __init__(self, model, loaders, config):   
         super().__init__(model, loaders, config)                          
 
     def _setup(self):
@@ -27,13 +26,10 @@ class CIPtrainer(BaseTrainer):
         self.ssim_y      = SRMetric('ssim', test_y_channel=True, crop_border=scale)
         self.psnr_rgb    = SRMetric('psnr', test_y_channel=False, crop_border=scale)
         self.ssim_rgb    = SRMetric('ssim', test_y_channel=False, crop_border=scale)
-        self.criterion_skip = nn.MSELoss()
-        self.criterion_up = nn.L1Loss()
+        self.criterion = CharbonnierLoss()
 
     def on_train_begin(self):
         super().on_train_begin()
-        # if self.model.__class__.__name__ not in self.CIPList:
-        #     raise TypeError(f"传入模型应该为{self.CIPList}，got {self.model.__class__.__name__}")
 
     def on_epoch_begin(self, epoch):
         super().on_epoch_begin(epoch)
@@ -94,15 +90,10 @@ class CIPtrainer(BaseTrainer):
 
     def _train_step(self, batch):
         lr_batch, hr_batch = batch
-        skip_pred, up_pred = self.model(lr_batch)
-        skip_res = hr_batch - skip_pred
-        loss1  = self.criterion_skip(skip_pred, hr_batch)
-        loss2  = self.criterion_up(up_pred + skip_pred, hr_batch)
-        loss   = loss1 + self.alpha * loss2
+        sr = self.model(lr_batch)
+        loss = self.criterion(sr, hr_batch)
         return {
             'train_loss': loss,
-            "skip_loss" : loss1.detach(),
-            "up_loss"  : loss2.detach(),
         }
 
     def _eval_step(self, batch):
@@ -111,7 +102,6 @@ class CIPtrainer(BaseTrainer):
         hr_batch = hr_batch * self.norm['gt']['div'] + self.norm['gt']['sub']
         sr_batch = (sr_batch * self.norm['gt']['div'] + self.norm['gt']['sub']).clamp(0, 1)
         return {
-            "val_loss": self.criterion_skip(sr_batch, hr_batch).item(),
             "psnr_y"    : self.psnr_y(sr_batch, hr_batch).item(),
             "ssim_y"    : self.ssim_y(sr_batch, hr_batch).item(),
             "psnr_rgb"  : self.psnr_rgb(sr_batch, hr_batch).item(),
@@ -119,10 +109,10 @@ class CIPtrainer(BaseTrainer):
         }
 
     def _get_train_metric_keys(self):
-        return ["train_loss", "skip_loss", "up_loss"]
+        return ["train_loss"]
 
     def _get_eval_metric_keys(self):
-        return ["val_loss", "psnr_y", "ssim_y", "psnr_rgb", "ssim_rgb"]
+        return ["psnr_y", "ssim_y", "psnr_rgb", "ssim_rgb"]
 
     def _save_checkpoint(self):
         eval_metric_key = self.config.get('eval_metric_key', 'val_loss')
@@ -151,34 +141,5 @@ class CIPtrainer(BaseTrainer):
                         f"  ↑ Best checkpoint saved | {eval_metric_key}: {current:.5f}"
                     )
         else:
-                super()._save_checkpoint()
+            super()._save_checkpoint()
         
-    # def patch_inference(self, model, lr_tensor, patch_size=128, overlap=16, scale=2):
-    #     """
-    #     lr_tensor: (1, 3, H, W), range [0,1]
-    #     """
-    #     B, C, H, W = lr_tensor.shape
-    #     stride = patch_size - overlap
-        
-    #     sr_tensor = torch.zeros(B, C, H*scale, W*scale, device=lr_tensor.device)
-    #     count_map = torch.zeros_like(sr_tensor)
-
-    #     for top in range(0, H, stride):
-    #         for left in range(0, W, stride):
-    #             t = min(top,  H - patch_size)
-    #             l = min(left, W - patch_size)
-
-    #             patch = lr_tensor[:, :, t:t+patch_size, l:l+patch_size]
-
-    #             with torch.no_grad():
-    #                 head_pred, res_pred = model(patch)  # ← 解包两个输出
-    #                 sr_patch = head_pred + res_pred      # ← 真实预测
-
-    #             sr_tensor[:, :,
-    #                     t*scale:(t+patch_size)*scale,
-    #                     l*scale:(l+patch_size)*scale] += sr_patch
-    #             count_map[:, :,
-    #                     t*scale:(t+patch_size)*scale,
-    #                     l*scale:(l+patch_size)*scale] += 1
-
-    #     return sr_tensor / count_map.clamp(min=1)

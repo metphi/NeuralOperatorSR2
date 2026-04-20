@@ -8,7 +8,7 @@ from models.models.CIPFNO import MultiScaleFNO2d
 
 
 class _UpSampleFNO2(nn.Module):
-    def __init__(self, in_channel, out_channel, modes1 = 4, modes2 = 4, width = 32, n_layers = 4, scale = 2,
+    def __init__(self, in_channel=64, out_channel=3, modes1 = 4, modes2 = 4, width = 32, n_layers = 4, scale = 2,
                  activation='gelu',
                  init_method='kaiming',
                  GroupNorm = True,
@@ -124,3 +124,5 @@ class EDSR_CIPFNO(nn.Module):
         x_up   = self.up_FNO(fea)
         return x_skip, x_up
         # return x_skip*torch.sigmoid(self.skip_weight), x_up*torch.sigmoid(self.up_weight)
+        
+    
